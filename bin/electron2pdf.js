@@ -11,16 +11,7 @@ function findElectronBinary() {
   }
 }
 
-function usageAndExit(exitCode) {
-  process.stderr.write('Usage: electron2pdf <url> <output.pdf>\n');
-  process.exit(exitCode);
-}
-
 const args = process.argv.slice(2);
-
-if (args.length === 0 || args.includes('-h') || args.includes('--help')) {
-  usageAndExit(args.length === 0 ? 2 : 0);
-}
 
 const electronBinary = findElectronBinary();
 if (!electronBinary) {

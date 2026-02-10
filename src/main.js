@@ -2,9 +2,41 @@ const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-function usageAndExit(exitCode) {
-  // No additional comments per project style; keep output minimal.
-  process.stderr.write('Usage: electron2pdf [options] <url> <output.pdf>\n');
+function helpAndExit(exitCode) {
+  const out = exitCode === 0 ? process.stdout : process.stderr;
+  out.write('Name:\n');
+  out.write('  electron2pdf\n\n');
+  out.write('Synopsis:\n');
+  out.write('  electron2pdf [GLOBAL OPTION]... <input url/file name> <output file>\n\n');
+  out.write('Description:\n');
+  out.write('  Renders a webpage or local HTML file to a PDF document using Electron.\n\n');
+  out.write('Global Options:\n');
+  out.write('  -h, --help                          Display help\n');
+  out.write('  -q, --quiet                         Same as using --log-level none\n');
+  out.write('      --log-level <level>             none, error, warn, info (default info)\n');
+  out.write('  -O, --orientation <orientation>     Landscape or Portrait (default Portrait)\n');
+  out.write('  -s, --page-size <Size>              A4, Letter, etc. (default uses CSS page size)\n');
+  out.write('  -T, --margin-top <unitreal>         Top margin (e.g. 10mm, 1cm, 0.5in)\n');
+  out.write('  -B, --margin-bottom <unitreal>      Bottom margin\n');
+  out.write('  -L, --margin-left <unitreal>        Left margin\n');
+  out.write('  -R, --margin-right <unitreal>       Right margin\n');
+  out.write('      --page-width <unitreal>         Custom page width\n');
+  out.write('      --page-height <unitreal>        Custom page height\n');
+  out.write('      --background                    Print background (default)\n');
+  out.write('      --no-background                 Do not print background\n');
+  out.write('      --viewport-size <WxH>           Set viewport size (e.g. 1280x720)\n');
+  out.write('      --zoom <float>                  Zoom factor (default 1)\n');
+  out.write('  -n, --disable-javascript            Disable JavaScript\n');
+  out.write('      --enable-javascript             Enable JavaScript (default)\n');
+  out.write('      --javascript-delay <msec>       Wait after load (default 200)\n');
+  out.write('      --window-status <string>        Wait until window.status equals value\n');
+  out.write('      --run-script <path>             Execute JavaScript from file (repeatable)\n');
+  out.write('      --custom-header <name> <value>  Add HTTP header (repeatable)\n');
+  out.write('      --cookie <name> <value>         Set a cookie for the main URL (repeatable)\n');
+  out.write('  -p, --proxy <proxy>                 Use a proxy (passed to Chromium)\n');
+  out.write('      --user-style-sheet <path>       Inject CSS from file\n');
+  out.write('      --print-media-type              Accepted for compatibility (no-op)\n');
+  out.write('      --no-print-media-type           Accepted for compatibility (no-op)\n\n');
   process.exit(exitCode);
 }
 
@@ -40,7 +72,7 @@ function parseArgs(argv) {
   const args = argv.slice(2);
 
   if (args.length === 0 || args.includes('-h') || args.includes('--help')) {
-    usageAndExit(args.length === 0 ? 2 : 0);
+    helpAndExit(args.length === 0 ? 2 : 0);
   }
 
   const options = {
@@ -76,12 +108,12 @@ function parseArgs(argv) {
   const positionals = [];
 
   function popValue(i) {
-    if (i + 1 >= args.length) usageAndExit(2);
+    if (i + 1 >= args.length) helpAndExit(2);
     return args[i + 1];
   }
 
   function popTwoValues(i) {
-    if (i + 2 >= args.length) usageAndExit(2);
+    if (i + 2 >= args.length) helpAndExit(2);
     return [args[i + 1], args[i + 2]];
   }
 
@@ -94,7 +126,7 @@ function parseArgs(argv) {
     }
 
     if (a === '-h' || a === '--help') {
-      usageAndExit(0);
+      helpAndExit(0);
     }
 
     if (a === '-q' || a === '--quiet') {
@@ -131,7 +163,7 @@ function parseArgs(argv) {
 
     if (a === '-O' || a === '--orientation') {
       const v = String(popValue(i));
-      if (v !== 'Portrait' && v !== 'Landscape') usageAndExit(2);
+      if (v !== 'Portrait' && v !== 'Landscape') helpAndExit(2);
       options.orientation = v;
       i++;
       continue;
@@ -145,7 +177,7 @@ function parseArgs(argv) {
 
     if (a === '--page-width') {
       const inches = unitRealToInches(popValue(i));
-      if (inches == null) usageAndExit(2);
+      if (inches == null) helpAndExit(2);
       options.pageWidthIn = inches;
       i++;
       continue;
@@ -153,7 +185,7 @@ function parseArgs(argv) {
 
     if (a === '--page-height') {
       const inches = unitRealToInches(popValue(i));
-      if (inches == null) usageAndExit(2);
+      if (inches == null) helpAndExit(2);
       options.pageHeightIn = inches;
       i++;
       continue;
@@ -161,7 +193,7 @@ function parseArgs(argv) {
 
     if (a === '-T' || a === '--margin-top') {
       const inches = unitRealToInches(popValue(i));
-      if (inches == null) usageAndExit(2);
+      if (inches == null) helpAndExit(2);
       options.marginTopIn = inches;
       i++;
       continue;
@@ -169,7 +201,7 @@ function parseArgs(argv) {
 
     if (a === '-B' || a === '--margin-bottom') {
       const inches = unitRealToInches(popValue(i));
-      if (inches == null) usageAndExit(2);
+      if (inches == null) helpAndExit(2);
       options.marginBottomIn = inches;
       i++;
       continue;
@@ -177,7 +209,7 @@ function parseArgs(argv) {
 
     if (a === '-L' || a === '--margin-left') {
       const inches = unitRealToInches(popValue(i));
-      if (inches == null) usageAndExit(2);
+      if (inches == null) helpAndExit(2);
       options.marginLeftIn = inches;
       i++;
       continue;
@@ -185,7 +217,7 @@ function parseArgs(argv) {
 
     if (a === '-R' || a === '--margin-right') {
       const inches = unitRealToInches(popValue(i));
-      if (inches == null) usageAndExit(2);
+      if (inches == null) helpAndExit(2);
       options.marginRightIn = inches;
       i++;
       continue;
@@ -193,7 +225,7 @@ function parseArgs(argv) {
 
     if (a === '--viewport-size') {
       const v = parseViewportSize(popValue(i));
-      if (!v) usageAndExit(2);
+      if (!v) helpAndExit(2);
       options.viewportSize = v;
       i++;
       continue;
@@ -201,7 +233,7 @@ function parseArgs(argv) {
 
     if (a === '--zoom') {
       const z = Number(popValue(i));
-      if (!Number.isFinite(z) || z <= 0) usageAndExit(2);
+      if (!Number.isFinite(z) || z <= 0) helpAndExit(2);
       options.zoomFactor = z;
       i++;
       continue;
@@ -219,7 +251,7 @@ function parseArgs(argv) {
 
     if (a === '--javascript-delay') {
       const ms = Number(popValue(i));
-      if (!Number.isFinite(ms) || ms < 0) usageAndExit(2);
+      if (!Number.isFinite(ms) || ms < 0) helpAndExit(2);
       options.javascriptDelayMs = ms;
       i++;
       continue;
@@ -336,8 +368,6 @@ function parseArgs(argv) {
       a === '--encoding' ||
       a === '--disable-external-links' ||
       a === '--enable-external-links' ||
-      a === '--disable-forms' ||
-      a === '--enable-forms' ||
       a === '--images' ||
       a === '--no-images' ||
       a === '--disable-internal-links' ||
@@ -352,14 +382,12 @@ function parseArgs(argv) {
       a === '--include-in-outline' ||
       a === '--page-offset' ||
       a === '--password' ||
-      a === '--disable-plugins' ||
-      a === '--enable-plugins' ||
-      a === '--proxy-hostname-lookup' ||
-      a === '--radiobutton-checked-svg' ||
-      a === '--radiobutton-svg' ||
+      a === '--post' ||
+      a === '--post-file' ||
+      a === '--print-media-type' ||
+      a === '--no-print-media-type' ||
+      a === '-p' ||
       a === '--resolve-relative-links' ||
-      a === '--disable-smart-shrinking' ||
-      a === '--enable-smart-shrinking' ||
       a === '--ssl-crt-path' ||
       a === '--ssl-key-password' ||
       a === '--ssl-key-path' ||
@@ -440,11 +468,11 @@ function parseArgs(argv) {
       continue;
     }
 
-    usageAndExit(2);
+    helpAndExit(2);
   }
 
   if (positionals.length < 2) {
-    usageAndExit(2);
+    helpAndExit(2);
   }
 
   const url = positionals[0];
@@ -499,6 +527,12 @@ async function renderToPdf({ url, outputFile, options }) {
   }
 
   await win.loadURL(targetUrl);
+
+  for (const scriptPath of options.runScript) {
+    const abs = path.resolve(process.cwd(), scriptPath);
+    const js = await fs.promises.readFile(abs, 'utf8');
+    await win.webContents.executeJavaScript(js, true);
+  }
 
   if (options.userStyleSheet) {
     const cssPath = path.resolve(process.cwd(), options.userStyleSheet);
