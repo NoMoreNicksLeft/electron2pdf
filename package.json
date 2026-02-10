@@ -1,0 +1,20 @@
+{
+  "name": "electron2pdf",
+  "version": "1.0.0",
+  "description": "Command-line Electron tool to render a webpage to PDF",
+  "main": "src/main.js",
+  "bin": {
+    "electron2pdf": "bin/electron2pdf.js"
+  },
+  "scripts": {
+    "start": "node bin/electron2pdf.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "private": false,
+  "devDependencies": {
+    "electron": "^40.2.1"
+  }
+}
