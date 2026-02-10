@@ -14,6 +14,9 @@
   "author": "",
   "license": "ISC",
   "private": false,
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  },
   "devDependencies": {
     "electron": "^40.2.1"
   }

@@ -1,13 +1,14 @@
 const { app, BrowserWindow } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { PDFDocument } = require('pdf-lib');
 
 function helpAndExit(exitCode) {
   const out = exitCode === 0 ? process.stdout : process.stderr;
   out.write('Name:\n');
   out.write('  electron2pdf\n\n');
   out.write('Synopsis:\n');
-  out.write('  electron2pdf [GLOBAL OPTION]... <input url/file name> <output file>\n\n');
+  out.write('  electron2pdf [GLOBAL OPTION]... <input url/file name>... <output file>\n\n');
   out.write('Description:\n');
   out.write('  Renders a webpage or local HTML file to a PDF document using Electron.\n\n');
   out.write('Global Options:\n');
@@ -475,10 +476,10 @@ function parseArgs(argv) {
     helpAndExit(2);
   }
 
-  const url = positionals[0];
-  const outputFile = positionals[1];
+  const outputFile = positionals[positionals.length - 1];
+  const inputs = positionals.slice(0, -1);
 
-  return { url, outputFile, options };
+  return { inputs, outputFile, options };
 }
 
 async function waitForWindowStatus(win, expected, timeoutMs) {
@@ -490,7 +491,64 @@ async function waitForWindowStatus(win, expected, timeoutMs) {
   }
 }
 
-async function renderToPdf({ url, outputFile, options }) {
+async function applyPrintMediaType(win) {
+  const js = `(() => {
+    try {
+      const MEDIA_RULE = 4;
+      const cssTexts = [];
+      const linkMediaToAll = [];
+      const includePrint = (mediaText) => {
+        if (!mediaText) return false;
+        return String(mediaText)
+          .split(',')
+          .some((p) => p.trim().toLowerCase() === 'print');
+      };
+
+      for (const node of Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))) {
+        try {
+          const media = node.getAttribute && node.getAttribute('media');
+          if (media && includePrint(media)) {
+            linkMediaToAll.push(true);
+            node.setAttribute('media', 'all');
+          }
+        } catch (e) {
+        }
+      }
+
+      for (const sheet of Array.from(document.styleSheets || [])) {
+        let rules;
+        try {
+          rules = sheet.cssRules;
+        } catch (e) {
+          continue;
+        }
+        if (!rules) continue;
+        for (const rule of Array.from(rules)) {
+          try {
+            if (rule && rule.type === MEDIA_RULE && includePrint(rule.media && rule.media.mediaText)) {
+              for (const inner of Array.from(rule.cssRules || [])) {
+                if (inner && inner.cssText) cssTexts.push(inner.cssText);
+              }
+            }
+          } catch (e) {
+          }
+        }
+      }
+
+      return { ok: true, cssTexts, linkChanges: linkMediaToAll.length };
+    } catch (e) {
+      return { ok: false, error: String(e && (e.stack || e.message || e)) };
+    }
+  })();`;
+
+  const result = await win.webContents.executeJavaScript(js, true);
+  if (result && result.ok === false) throw new Error(result.error || 'Failed to collect print media CSS');
+  if (result && Array.isArray(result.cssTexts) && result.cssTexts.length > 0) {
+    await win.webContents.insertCSS(result.cssTexts.join('\n'));
+  }
+}
+
+async function renderSingleToPdfBuffer({ input, options }) {
   const viewport = options.viewportSize || { width: 1280, height: 720 };
 
   const win = new BrowserWindow({
@@ -505,7 +563,7 @@ async function renderToPdf({ url, outputFile, options }) {
     },
   });
 
-  const targetUrl = normalizeInputToUrl(url);
+  const targetUrl = normalizeInputToUrl(input);
 
   if (options.customHeaders.length > 0) {
     win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
@@ -527,6 +585,10 @@ async function renderToPdf({ url, outputFile, options }) {
   }
 
   await win.loadURL(targetUrl);
+
+  if (options.printMediaType) {
+    await applyPrintMediaType(win);
+  }
 
   for (const scriptPath of options.runScript) {
     const abs = path.resolve(process.cwd(), scriptPath);
@@ -581,16 +643,23 @@ async function renderToPdf({ url, outputFile, options }) {
   }
 
   const pdfBuffer = await win.webContents.printToPDF(printOptions);
-
-  const outPath = path.resolve(process.cwd(), outputFile);
-  await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
-  await fs.promises.writeFile(outPath, pdfBuffer);
-
   win.close();
+
+  return pdfBuffer;
+}
+
+async function mergePdfBuffers(buffers) {
+  const merged = await PDFDocument.create();
+  for (const buf of buffers) {
+    const src = await PDFDocument.load(buf);
+    const pages = await merged.copyPages(src, src.getPageIndices());
+    for (const p of pages) merged.addPage(p);
+  }
+  return Buffer.from(await merged.save());
 }
 
 (async () => {
-  const { url, outputFile, options } = parseArgs(process.argv);
+  const { inputs, outputFile, options } = parseArgs(process.argv);
 
   if (options.proxy) {
     app.commandLine.appendSwitch('proxy-server', options.proxy);
@@ -602,7 +671,19 @@ async function renderToPdf({ url, outputFile, options }) {
 
   try {
     await app.whenReady();
-    await renderToPdf({ url, outputFile, options });
+
+    const pdfBuffers = [];
+    for (const input of inputs) {
+      const buf = await renderSingleToPdfBuffer({ input, options });
+      pdfBuffers.push(buf);
+    }
+
+    const mergedBuffer = pdfBuffers.length === 1 ? pdfBuffers[0] : await mergePdfBuffers(pdfBuffers);
+
+    const outPath = path.resolve(process.cwd(), outputFile);
+    await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
+    await fs.promises.writeFile(outPath, mergedBuffer);
+
     process.exit(0);
   } catch (err) {
     process.stderr.write((err && err.stack) ? `${err.stack}\n` : `${String(err)}\n`);
