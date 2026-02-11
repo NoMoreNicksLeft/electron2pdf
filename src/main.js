@@ -6,6 +6,15 @@ const path = require('path');
 const { PDFDocument } = require('pdf-lib');
 const SaxonJS = require('saxon-js');
 const { spawn } = require('child_process');
+const readline = require('readline');
+
+class ExitError extends Error {
+  constructor(exitCode) {
+    super('exit');
+    this.name = 'ExitError';
+    this.exitCode = Number(exitCode);
+  }
+}
 
 function helpAndExit(exitCode) {
   const out = exitCode === 0 ? process.stdout : process.stderr;
@@ -45,11 +54,13 @@ function helpAndExit(exitCode) {
   out.write('      --user-style-sheet <path>       Inject CSS from file\n');
   out.write('      --print-media-type              Apply @media print styles before rendering\n');
   out.write('      --no-print-media-type           Do not apply @media print styles (default)\n\n');
+  out.write('      --read-args-from-stdin          Read command line arguments from stdin (one invocation per line)\n\n');
   out.write('TOC Options:\n');
   out.write('      toc                              Insert a table of contents as first page\n');
   out.write('      --dump-default-toc-xsl          Dump the default TOC XSL to stdout\n');
   out.write('      --xsl-style-sheet <file>        Use custom XSL to generate TOC HTML\n\n');
-  process.exit(exitCode);
+
+  throw new ExitError(exitCode);
 }
 
 function defaultTocXsl() {
@@ -145,8 +156,71 @@ function normalizeInputToUrl(input) {
   return `file://${abs}`;
 }
 
-function parseArgs(argv) {
-  const args = argv.slice(2);
+function tokenizeArgLine(line) {
+  const s = String(line);
+  const out = [];
+  let cur = '';
+  let quote = null;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+        continue;
+      }
+      if (quote === '"' && ch === '\\' && i + 1 < s.length) {
+        i++;
+        cur += s[i];
+        continue;
+      }
+      cur += ch;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+
+    if (ch === '\\' && i + 1 < s.length) {
+      i++;
+      cur += s[i];
+      continue;
+    }
+
+    if (/\s/.test(ch)) {
+      if (cur.length > 0) {
+        out.push(cur);
+        cur = '';
+      }
+      continue;
+    }
+
+    cur += ch;
+  }
+
+  if (cur.length > 0) out.push(cur);
+  return out;
+}
+
+function mergeOptions(base, override) {
+  const merged = { ...base, ...override };
+
+  merged.customHeaders = [...(base.customHeaders || []), ...(override.customHeaders || [])];
+  merged.cookies = [...(base.cookies || []), ...(override.cookies || [])];
+  merged.allow = [...(base.allow || []), ...(override.allow || [])];
+  merged.bypassProxyFor = [...(base.bypassProxyFor || []), ...(override.bypassProxyFor || [])];
+  merged.post = [...(base.post || []), ...(override.post || [])];
+  merged.postFile = [...(base.postFile || []), ...(override.postFile || [])];
+  merged.runScript = [...(base.runScript || []), ...(override.runScript || [])];
+  merged.replace = [...(base.replace || []), ...(override.replace || [])];
+
+  return merged;
+}
+
+function parseArgsArray(args, { allowNoPositionals = false } = {}) {
 
   if (args.length === 0 || args.includes('-h') || args.includes('--help')) {
     helpAndExit(args.length === 0 ? 2 : 0);
@@ -174,6 +248,7 @@ function parseArgs(argv) {
     printMediaType: false,
     toc: false,
     xslStyleSheet: undefined,
+    readArgsFromStdin: false,
     background: true,
     orientation: 'Portrait',
     pageSize: undefined,
@@ -208,6 +283,11 @@ function parseArgs(argv) {
 
     if (a === '-h' || a === '--help') {
       helpAndExit(0);
+    }
+
+    if (a === '--read-args-from-stdin') {
+      options.readArgsFromStdin = true;
+      continue;
     }
 
     if (a === '--dump-default-toc-xsl') {
@@ -578,7 +658,11 @@ function parseArgs(argv) {
   }
 
   if (positionals.length < 2) {
-    helpAndExit(2);
+    if (!allowNoPositionals) helpAndExit(2);
+  }
+
+  if (positionals.length === 0) {
+    return { inputs: [], outputFile: undefined, options };
   }
 
   const outputFile = positionals[positionals.length - 1];
@@ -593,10 +677,14 @@ function parseArgs(argv) {
   }
 
   if (inputs.length === 0) {
-    helpAndExit(2);
+    if (!allowNoPositionals) helpAndExit(2);
   }
 
   return { inputs, outputFile, options };
+}
+
+function parseArgs(argv) {
+  return parseArgsArray(argv.slice(2));
 }
 
 async function waitForWindowStatus(win, expected, timeoutMs) {
@@ -880,7 +968,8 @@ async function tocHtmlFromOutlineXml({ outlineXml, options }) {
 }
 
 (async () => {
-  const { inputs, outputFile, options } = parseArgs(process.argv);
+  const baseParsed = parseArgsArray(process.argv.slice(2), { allowNoPositionals: true });
+  const { inputs, outputFile, options } = baseParsed;
 
   if (options.proxy) {
     app.commandLine.appendSwitch('proxy-server', options.proxy);
@@ -892,6 +981,91 @@ async function tocHtmlFromOutlineXml({ outlineXml, options }) {
 
   try {
     await app.whenReady();
+
+    if (options.readArgsFromStdin) {
+      const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+
+      for await (const line of rl) {
+        const trimmed = String(line).trim();
+        if (!trimmed) continue;
+
+        const lineArgs = tokenizeArgLine(trimmed);
+        let parsed;
+        try {
+          parsed = parseArgsArray(lineArgs);
+        } catch (e) {
+          if (e && e.name === 'ExitError' && Number.isInteger(Number(e.exitCode))) {
+            process.exit(Number(e.exitCode));
+            return;
+          }
+          throw e;
+        }
+        const mergedOptions = mergeOptions(options, parsed.options);
+        const invInputs = parsed.inputs;
+        const invOutput = parsed.outputFile;
+
+        if (!invInputs || invInputs.length === 0 || !invOutput) {
+          helpAndExit(2);
+        }
+
+        const invPdfBuffers = [];
+        const invPageCounts = [];
+        for (const input of invInputs) {
+          const buf = await renderSingleToPdfBuffer({ input, options: mergedOptions });
+          invPdfBuffers.push(buf);
+          const doc = await PDFDocument.load(buf);
+          invPageCounts.push(doc.getPageCount());
+        }
+
+        let mergedPagesBuffer = invPdfBuffers.length === 1 ? invPdfBuffers[0] : await mergePdfBuffers(invPdfBuffers);
+
+        if (mergedOptions.toc) {
+          let tocPdfBuffer = null;
+          let tocPageCount = 1;
+
+          for (let iter = 0; iter < 3; iter++) {
+            let pageCursor = tocPageCount + 1;
+            const items = invInputs.map((inp, idx) => {
+              const title = String(inp);
+              const link = normalizeInputToUrl(inp);
+              const page = pageCursor;
+              pageCursor += invPageCounts[idx];
+              return { title, link, page };
+            });
+
+            const outlineXml = buildOutlineXml(items);
+            const tocHtml = await tocHtmlFromOutlineXml({ outlineXml, options: mergedOptions });
+            const tocDataUrl = `data:text/html;base64,${Buffer.from(tocHtml, 'utf8').toString('base64')}`;
+            tocPdfBuffer = await renderSingleToPdfBuffer({ input: tocDataUrl, options: mergedOptions });
+            const tocDoc = await PDFDocument.load(tocPdfBuffer);
+            const newCount = tocDoc.getPageCount();
+            if (newCount === tocPageCount) break;
+            tocPageCount = newCount;
+          }
+
+          mergedPagesBuffer = await mergePdfBuffers([tocPdfBuffer, mergedPagesBuffer]);
+        }
+
+        const mergedBuffer = mergedPagesBuffer;
+        let finalBuffer = mergedBuffer;
+        if (mergedOptions.title) {
+          const doc = await PDFDocument.load(mergedBuffer);
+          doc.setTitle(mergedOptions.title);
+          finalBuffer = Buffer.from(await doc.save());
+        }
+
+        const outPath = path.resolve(process.cwd(), invOutput);
+        await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
+        await fs.promises.writeFile(outPath, finalBuffer);
+      }
+
+      process.exit(0);
+      return;
+    }
+
+    if (!outputFile || !inputs || inputs.length === 0) {
+      helpAndExit(2);
+    }
 
     const pdfBuffers = [];
     const pageCounts = [];
@@ -946,6 +1120,9 @@ async function tocHtmlFromOutlineXml({ outlineXml, options }) {
 
     process.exit(0);
   } catch (err) {
+    if (err && err.name === 'ExitError' && Number.isInteger(Number(err.exitCode))) {
+      process.exit(Number(err.exitCode));
+    }
     process.stderr.write((err && err.stack) ? `${err.stack}\n` : `${String(err)}\n`);
     process.exit(1);
   }
