@@ -10,11 +10,12 @@ function helpAndExit(exitCode) {
   out.write('Synopsis:\n');
   out.write('  electron2pdf [GLOBAL OPTION]... <input url/file name>... <output file>\n\n');
   out.write('Description:\n');
-  out.write('  Renders a webpage or local HTML file to a PDF document using Electron.\n\n');
+  out.write('  Renders a webpage or local HTML file to a PDF document using Chromium.\n\n');
   out.write('Global Options:\n');
   out.write('  -h, --help                          Display help\n');
   out.write('  -q, --quiet                         Same as using --log-level none\n');
   out.write('      --log-level <level>             none, error, warn, info (default info)\n');
+  out.write('      --title <text>                  Set PDF metadata title\n');
   out.write('  -O, --orientation <orientation>     Landscape or Portrait (default Portrait)\n');
   out.write('  -s, --page-size <Size>              A4, Letter, etc. (default uses CSS page size)\n');
   out.write('  -T, --margin-top <unitreal>         Top margin (e.g. 10mm, 1cm, 0.5in)\n');
@@ -32,12 +33,14 @@ function helpAndExit(exitCode) {
   out.write('      --javascript-delay <msec>       Wait after load (default 200)\n');
   out.write('      --window-status <string>        Wait until window.status equals value\n');
   out.write('      --run-script <path>             Execute JavaScript from file (repeatable)\n');
+  out.write('      --stop-slow-scripts             Stop slow running scripts (non-default)\n');
+  out.write('      --no-stop-slow-scripts          Do not stop slow running scripts (default)\n');
   out.write('      --custom-header <name> <value>  Add HTTP header (repeatable)\n');
   out.write('      --cookie <name> <value>         Set a cookie for the main URL (repeatable)\n');
   out.write('  -p, --proxy <proxy>                 Use a proxy (passed to Chromium)\n');
   out.write('      --user-style-sheet <path>       Inject CSS from file\n');
-  out.write('      --print-media-type              Accepted for compatibility (no-op)\n');
-  out.write('      --no-print-media-type           Accepted for compatibility (no-op)\n\n');
+  out.write('      --print-media-type              Apply @media print styles before rendering\n');
+  out.write('      --no-print-media-type           Do not apply @media print styles (default)\n\n');
   process.exit(exitCode);
 }
 
@@ -88,6 +91,8 @@ function parseArgs(argv) {
     proxy: undefined,
     quiet: false,
     logLevel: 'info',
+    title: undefined,
+    stopSlowScripts: false,
     javascriptEnabled: true,
     javascriptDelayMs: 200,
     windowStatus: undefined,
@@ -139,6 +144,22 @@ function parseArgs(argv) {
     if (a === '--log-level') {
       options.logLevel = String(popValue(i));
       i++;
+      continue;
+    }
+
+    if (a === '--title') {
+      options.title = String(popValue(i));
+      i++;
+      continue;
+    }
+
+    if (a === '--stop-slow-scripts') {
+      options.stopSlowScripts = true;
+      continue;
+    }
+
+    if (a === '--no-stop-slow-scripts') {
+      options.stopSlowScripts = false;
       continue;
     }
 
@@ -392,8 +413,6 @@ function parseArgs(argv) {
       a === '--ssl-crt-path' ||
       a === '--ssl-key-password' ||
       a === '--ssl-key-path' ||
-      a === '--stop-slow-scripts' ||
-      a === '--no-stop-slow-scripts' ||
       a === '--disable-toc-back-links' ||
       a === '--enable-toc-back-links' ||
       a === '--username' ||
@@ -548,6 +567,33 @@ async function applyPrintMediaType(win) {
   }
 }
 
+async function stopSlowScriptsIfNeeded(win, timeoutMs) {
+  const idlePromiseJs = `new Promise((resolve) => {
+    try {
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => resolve(true));
+      } else {
+        setTimeout(() => resolve(true), 0);
+      }
+    } catch (e) {
+      resolve(true);
+    }
+  })`;
+
+  const idlePromise = win.webContents.executeJavaScript(idlePromiseJs, true);
+  const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs));
+
+  const idleWon = await Promise.race([
+    idlePromise.then(() => true).catch(() => true),
+    timeoutPromise,
+  ]);
+
+  if (!idleWon) {
+    await win.webContents.executeJavaScript('window.stop && window.stop()', true);
+    process.stderr.write('A slow script was stopped\n');
+  }
+}
+
 async function renderSingleToPdfBuffer({ input, options }) {
   const viewport = options.viewportSize || { width: 1280, height: 720 };
 
@@ -588,6 +634,10 @@ async function renderSingleToPdfBuffer({ input, options }) {
 
   if (options.printMediaType) {
     await applyPrintMediaType(win);
+  }
+
+  if (options.stopSlowScripts) {
+    await stopSlowScriptsIfNeeded(win, 5000);
   }
 
   for (const scriptPath of options.runScript) {
@@ -680,9 +730,16 @@ async function mergePdfBuffers(buffers) {
 
     const mergedBuffer = pdfBuffers.length === 1 ? pdfBuffers[0] : await mergePdfBuffers(pdfBuffers);
 
+    let finalBuffer = mergedBuffer;
+    if (options.title) {
+      const doc = await PDFDocument.load(mergedBuffer);
+      doc.setTitle(options.title);
+      finalBuffer = Buffer.from(await doc.save());
+    }
+
     const outPath = path.resolve(process.cwd(), outputFile);
     await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
-    await fs.promises.writeFile(outPath, mergedBuffer);
+    await fs.promises.writeFile(outPath, finalBuffer);
 
     process.exit(0);
   } catch (err) {

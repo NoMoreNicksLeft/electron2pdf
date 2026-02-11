@@ -1,7 +1,7 @@
 {
   "name": "electron2pdf",
   "version": "1.0.0",
-  "description": "Command-line Electron tool to render a webpage to PDF",
+  "description": "Command-line Chromium tool to render a webpage to PDF",
   "main": "src/main.js",
   "bin": {
     "electron2pdf": "bin/electron2pdf.js"

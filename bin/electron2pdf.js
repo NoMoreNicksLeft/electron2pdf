@@ -15,7 +15,7 @@ const args = process.argv.slice(2);
 
 const electronBinary = findElectronBinary();
 if (!electronBinary) {
-  process.stderr.write('electron dependency not found. Run: npm install\n');
+  process.stderr.write('Chromium runtime dependency not found (npm package: electron). Run: npm install\n');
   process.exit(1);
 }
 
