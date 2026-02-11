@@ -734,7 +734,17 @@ function parseArgsArray(args, { allowNoPositionals = false } = {}) {
 }
 
 function parseArgs(argv) {
-  return parseArgsArray(argv.slice(2));
+  return parseArgsArray(getUserArgs(argv));
+}
+
+function getUserArgs(argv) {
+  const a = Array.isArray(argv) ? argv : [];
+  if (a.length < 2) return [];
+  const second = String(a[1] || '');
+  if (second.endsWith('.js') || second.endsWith('.asar')) {
+    return a.slice(2);
+  }
+  return a.slice(1);
 }
 
 async function waitForWindowStatus(win, expected, timeoutMs) {
@@ -1018,8 +1028,20 @@ async function tocHtmlFromOutlineXml({ outlineXml, options }) {
 }
 
 (async () => {
-  const baseParsed = parseArgsArray(process.argv.slice(2), { allowNoPositionals: true });
-  const { inputs, outputFile, options } = baseParsed;
+  let inputs;
+  let outputFile;
+  let options;
+  try {
+    const baseParsed = parseArgsArray(getUserArgs(process.argv), { allowNoPositionals: true });
+    inputs = baseParsed.inputs;
+    outputFile = baseParsed.outputFile;
+    options = baseParsed.options;
+  } catch (err) {
+    if (err && err.name === 'ExitError' && Number.isInteger(Number(err.exitCode))) {
+      process.exit(Number(err.exitCode));
+    }
+    throw err;
+  }
 
   if (options.proxy) {
     app.commandLine.appendSwitch('proxy-server', options.proxy);
