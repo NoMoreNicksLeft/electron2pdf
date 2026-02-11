@@ -16,6 +16,56 @@ class ExitError extends Error {
   }
 }
 
+const LARGE_ARG_LIMIT_BYTES = 64 * 1024;
+const LARGE_ARG_PREFIX = '@file:';
+
+function isLargeArg(value) {
+  return Buffer.byteLength(String(value), 'utf8') > LARGE_ARG_LIMIT_BYTES;
+}
+
+async function externalizeLargeArgs(args) {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'electron2pdf-args-'));
+  const tempFiles = [];
+  const out = [];
+
+  for (const a of args) {
+    if (!isLargeArg(a)) {
+      out.push(a);
+      continue;
+    }
+
+    const hash = crypto.createHash('sha256').update(String(a)).digest('hex');
+    const p = path.join(dir, `${hash}.txt`);
+    await fs.promises.writeFile(p, String(a), 'utf8');
+    tempFiles.push(p);
+    out.push(`${LARGE_ARG_PREFIX}${p}`);
+  }
+
+  return { args: out, tempFiles, dir };
+}
+
+async function cleanupTempFiles(tempFiles, dir) {
+  for (const p of tempFiles) {
+    try {
+      await fs.promises.unlink(p);
+    } catch {
+    }
+  }
+  if (dir) {
+    try {
+      await fs.promises.rmdir(dir);
+    } catch {
+    }
+  }
+}
+
+async function materializeArg(value) {
+  const s = String(value);
+  if (!s.startsWith(LARGE_ARG_PREFIX)) return s;
+  const p = s.slice(LARGE_ARG_PREFIX.length);
+  return await fs.promises.readFile(p, 'utf8');
+}
+
 function helpAndExit(exitCode) {
   const out = exitCode === 0 ? process.stdout : process.stderr;
   out.write('Name:\n');
@@ -984,28 +1034,48 @@ async function tocHtmlFromOutlineXml({ outlineXml, options }) {
 
     if (options.readArgsFromStdin) {
       const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+      let tempFiles = [];
+      let tempDir = null;
 
       for await (const line of rl) {
         const trimmed = String(line).trim();
         if (!trimmed) continue;
 
-        const lineArgs = tokenizeArgLine(trimmed);
+        const tokenized = tokenizeArgLine(trimmed);
+        const externalized = await externalizeLargeArgs(tokenized);
+        if (!tempDir) tempDir = externalized.dir;
+        tempFiles = tempFiles.concat(externalized.tempFiles);
+        const lineArgs = externalized.args;
         let parsed;
         try {
           parsed = parseArgsArray(lineArgs);
         } catch (e) {
           if (e && e.name === 'ExitError' && Number.isInteger(Number(e.exitCode))) {
+            await cleanupTempFiles(tempFiles, tempDir);
             process.exit(Number(e.exitCode));
             return;
           }
           throw e;
         }
         const mergedOptions = mergeOptions(options, parsed.options);
-        const invInputs = parsed.inputs;
-        const invOutput = parsed.outputFile;
+        const invInputs = [];
+        for (const x of parsed.inputs) invInputs.push(await materializeArg(x));
+        const invOutput = parsed.outputFile == null ? undefined : await materializeArg(parsed.outputFile);
 
         if (!invInputs || invInputs.length === 0 || !invOutput) {
           helpAndExit(2);
+        }
+
+        if (mergedOptions.title) {
+          mergedOptions.title = await materializeArg(mergedOptions.title);
+        }
+
+        if (mergedOptions.xslStyleSheet) {
+          mergedOptions.xslStyleSheet = await materializeArg(mergedOptions.xslStyleSheet);
+        }
+
+        if (mergedOptions.userStyleSheet) {
+          mergedOptions.userStyleSheet = await materializeArg(mergedOptions.userStyleSheet);
         }
 
         const invPdfBuffers = [];
@@ -1059,6 +1129,7 @@ async function tocHtmlFromOutlineXml({ outlineXml, options }) {
         await fs.promises.writeFile(outPath, finalBuffer);
       }
 
+      await cleanupTempFiles(tempFiles, tempDir);
       process.exit(0);
       return;
     }
