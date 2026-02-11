@@ -1,7 +1,11 @@
 const { app, BrowserWindow } = require('electron');
+const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { PDFDocument } = require('pdf-lib');
+const SaxonJS = require('saxon-js');
+const { spawn } = require('child_process');
 
 function helpAndExit(exitCode) {
   const out = exitCode === 0 ? process.stdout : process.stderr;
@@ -41,7 +45,76 @@ function helpAndExit(exitCode) {
   out.write('      --user-style-sheet <path>       Inject CSS from file\n');
   out.write('      --print-media-type              Apply @media print styles before rendering\n');
   out.write('      --no-print-media-type           Do not apply @media print styles (default)\n\n');
+  out.write('TOC Options:\n');
+  out.write('      toc                              Insert a table of contents as first page\n');
+  out.write('      --dump-default-toc-xsl          Dump the default TOC XSL to stdout\n');
+  out.write('      --xsl-style-sheet <file>        Use custom XSL to generate TOC HTML\n\n');
   process.exit(exitCode);
+}
+
+function defaultTocXsl() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet version="2.0"
+                xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+                xmlns:outline="http://wkhtmltopdf.org/outline"
+                xmlns="http://www.w3.org/1999/xhtml">
+  <xsl:output doctype-public="-//W3C//DTD XHTML 1.0 Strict//EN"
+              doctype-system="http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"
+              indent="yes" />
+  <xsl:template match="outline:outline">
+    <html>
+      <head>
+        <title>Table of Contents</title>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <style>
+          h1 {
+            text-align: center;
+            font-size: 20px;
+            font-family: arial;
+          }
+          div {border-bottom: 1px dashed rgb(200,200,200);}
+          span {float: right;}
+          li {list-style: none;}
+          ul {
+            font-size: 20px;
+            font-family: arial;
+          }
+          ul ul {font-size: 80%; }
+          ul {padding-left: 0em;}
+          ul ul {padding-left: 1em;}
+          a {text-decoration:none; color: black;}
+        </style>
+      </head>
+      <body>
+        <h1>Table of Contents</h1>
+        <ul><xsl:apply-templates select="outline:item/outline:item"/></ul>
+      </body>
+    </html>
+  </xsl:template>
+  <xsl:template match="outline:item">
+    <li>
+      <xsl:if test="@title!=''">
+        <div>
+          <a>
+            <xsl:if test="@link">
+              <xsl:attribute name="href"><xsl:value-of select="@link"/></xsl:attribute>
+            </xsl:if>
+            <xsl:if test="@backLink">
+              <xsl:attribute name="name"><xsl:value-of select="@backLink"/></xsl:attribute>
+            </xsl:if>
+            <xsl:value-of select="@title" /> 
+          </a>
+          <span> <xsl:value-of select="@page" /> </span>
+        </div>
+      </xsl:if>
+      <ul>
+        <xsl:comment>added to prevent self-closing tags in QtXmlPatterns</xsl:comment>
+        <xsl:apply-templates select="outline:item"/>
+      </ul>
+    </li>
+  </xsl:template>
+</xsl:stylesheet>
+`;
 }
 
 function parseViewportSize(value) {
@@ -99,6 +172,8 @@ function parseArgs(argv) {
     viewportSize: undefined,
     zoomFactor: 1,
     printMediaType: false,
+    toc: false,
+    xslStyleSheet: undefined,
     background: true,
     orientation: 'Portrait',
     pageSize: undefined,
@@ -133,6 +208,11 @@ function parseArgs(argv) {
 
     if (a === '-h' || a === '--help') {
       helpAndExit(0);
+    }
+
+    if (a === '--dump-default-toc-xsl') {
+      process.stdout.write(defaultTocXsl());
+      process.exit(0);
     }
 
     if (a === '-q' || a === '--quiet') {
@@ -287,6 +367,12 @@ function parseArgs(argv) {
 
     if (a === '--user-style-sheet') {
       options.userStyleSheet = String(popValue(i));
+      i++;
+      continue;
+    }
+
+    if (a === '--xsl-style-sheet') {
+      options.xslStyleSheet = String(popValue(i));
       i++;
       continue;
     }
@@ -496,7 +582,19 @@ function parseArgs(argv) {
   }
 
   const outputFile = positionals[positionals.length - 1];
-  const inputs = positionals.slice(0, -1);
+  const inputsRaw = positionals.slice(0, -1);
+  const inputs = [];
+  for (const p of inputsRaw) {
+    if (p === 'toc') {
+      options.toc = true;
+      continue;
+    }
+    inputs.push(p);
+  }
+
+  if (inputs.length === 0) {
+    helpAndExit(2);
+  }
 
   return { inputs, outputFile, options };
 }
@@ -708,6 +806,79 @@ async function mergePdfBuffers(buffers) {
   return Buffer.from(await merged.save());
 }
 
+function escapeXmlAttr(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function buildOutlineXml(items) {
+  const lines = [];
+  lines.push('<?xml version="1.0" encoding="UTF-8"?>');
+  lines.push('<outline:outline xmlns:outline="http://wkhtmltopdf.org/outline">');
+  lines.push('<outline:item>');
+  for (const it of items) {
+    lines.push(`<outline:item title="${escapeXmlAttr(it.title)}" page="${escapeXmlAttr(it.page)}" link="${escapeXmlAttr(it.link)}"/>`);
+  }
+  lines.push('</outline:item>');
+  lines.push('</outline:outline>');
+  return lines.join('\n');
+}
+
+function runXslt3Compile({ xslPath, exportPath }) {
+  return new Promise((resolve, reject) => {
+    const xslt3Path = path.resolve(__dirname, '..', 'node_modules', 'xslt3', 'xslt3.js');
+    const args = [xslt3Path, `-xsl:${xslPath}`, `-export:${exportPath}`, '-nogo', '-ns:##html5'];
+    const child = spawn(process.execPath, args, { stdio: 'pipe' });
+    let stderr = '';
+    child.stderr.on('data', (d) => { stderr += d.toString('utf8'); });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(stderr || `xslt3 compile failed with exit code ${code}`));
+    });
+  });
+}
+
+async function getCompiledStylesheetForXsl({ xslText, cacheKey }) {
+  const dir = path.join(os.tmpdir(), 'electron2pdf-xslt');
+  await fs.promises.mkdir(dir, { recursive: true });
+  const xslPath = path.join(dir, `${cacheKey}.xsl`);
+  const sefPath = path.join(dir, `${cacheKey}.sef.json`);
+
+  try {
+    await fs.promises.access(sefPath);
+  } catch {
+    await fs.promises.writeFile(xslPath, xslText, 'utf8');
+    await runXslt3Compile({ xslPath, exportPath: sefPath });
+  }
+
+  const sefJson = await fs.promises.readFile(sefPath, 'utf8');
+  return JSON.parse(sefJson);
+}
+
+async function tocHtmlFromOutlineXml({ outlineXml, options }) {
+  let xslText = defaultTocXsl();
+  if (options.xslStyleSheet) {
+    const abs = path.resolve(process.cwd(), options.xslStyleSheet);
+    xslText = await fs.promises.readFile(abs, 'utf8');
+  }
+
+  const cacheKey = crypto.createHash('sha256').update(xslText).digest('hex');
+  const stylesheetInternal = await getCompiledStylesheetForXsl({ xslText, cacheKey });
+
+  const result = await SaxonJS.transform({
+    stylesheetInternal,
+    sourceText: outlineXml,
+    destination: 'serialized',
+  }, 'async');
+
+  return result.principalResult;
+}
+
 (async () => {
   const { inputs, outputFile, options } = parseArgs(process.argv);
 
@@ -723,12 +894,44 @@ async function mergePdfBuffers(buffers) {
     await app.whenReady();
 
     const pdfBuffers = [];
+    const pageCounts = [];
     for (const input of inputs) {
       const buf = await renderSingleToPdfBuffer({ input, options });
       pdfBuffers.push(buf);
+      const doc = await PDFDocument.load(buf);
+      pageCounts.push(doc.getPageCount());
     }
 
-    const mergedBuffer = pdfBuffers.length === 1 ? pdfBuffers[0] : await mergePdfBuffers(pdfBuffers);
+    let mergedPagesBuffer = pdfBuffers.length === 1 ? pdfBuffers[0] : await mergePdfBuffers(pdfBuffers);
+
+    if (options.toc) {
+      let tocPdfBuffer = null;
+      let tocPageCount = 1;
+
+      for (let iter = 0; iter < 3; iter++) {
+        let pageCursor = tocPageCount + 1;
+        const items = inputs.map((inp, idx) => {
+          const title = String(inp);
+          const link = normalizeInputToUrl(inp);
+          const page = pageCursor;
+          pageCursor += pageCounts[idx];
+          return { title, link, page };
+        });
+
+        const outlineXml = buildOutlineXml(items);
+        const tocHtml = await tocHtmlFromOutlineXml({ outlineXml, options });
+        const tocDataUrl = `data:text/html;base64,${Buffer.from(tocHtml, 'utf8').toString('base64')}`;
+        tocPdfBuffer = await renderSingleToPdfBuffer({ input: tocDataUrl, options });
+        const tocDoc = await PDFDocument.load(tocPdfBuffer);
+        const newCount = tocDoc.getPageCount();
+        if (newCount === tocPageCount) break;
+        tocPageCount = newCount;
+      }
+
+      mergedPagesBuffer = await mergePdfBuffers([tocPdfBuffer, mergedPagesBuffer]);
+    }
+
+    const mergedBuffer = mergedPagesBuffer;
 
     let finalBuffer = mergedBuffer;
     if (options.title) {
