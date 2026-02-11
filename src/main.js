@@ -978,7 +978,7 @@ function buildOutlineXml(items) {
 
 function runXslt3Compile({ xslPath, exportPath }) {
   return new Promise((resolve, reject) => {
-    const xslt3Path = path.resolve(__dirname, '..', 'node_modules', 'xslt3', 'xslt3.js');
+    const xslt3Path = require.resolve('xslt3/xslt3.js');
     const args = [xslt3Path, `-xsl:${xslPath}`, `-export:${exportPath}`, '-nogo', '-ns:##html5'];
     const child = spawn(process.execPath, args, { stdio: 'pipe' });
     let stderr = '';

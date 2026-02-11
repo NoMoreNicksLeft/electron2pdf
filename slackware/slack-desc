@@ -1,0 +1,17 @@
+# HOW TO EDIT THIS FILE:
+# The "handy ruler" below makes it easier to edit a package description.  Line
+# up the first '|' above the ':' following the base package name, and the '|' on
+# the right side marks the last column you can put a character in.  You must
+# make exactly 11 lines for the formatting to be correct.
+
+          |-----handy-ruler------------------------------------------------------|
+electron2pdf: electron2pdf (Chromium-based HTML to PDF CLI)
+electron2pdf:
+electron2pdf: electron2pdf renders webpages or local HTML files to PDF using
+electron2pdf: Chromium via an Electron runtime.
+electron2pdf:
+electron2pdf: This SlackBuild repackages the prebuilt Linux tarball and installs
+electron2pdf: into /opt/electron2pdf with a /usr/bin/electron2pdf symlink.
+electron2pdf:
+electron2pdf: Homepage: https://example.com/REPLACE_ME
+electron2pdf:

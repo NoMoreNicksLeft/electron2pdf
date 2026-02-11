@@ -11,17 +11,5 @@ module.exports = {
       name: '@electron-forge/maker-zip',
       platforms: ['darwin', 'linux', 'win32'],
     },
-    {
-      name: '@electron-forge/maker-squirrel',
-      platforms: ['win32'],
-    },
-    {
-      name: '@electron-forge/maker-deb',
-      platforms: ['linux'],
-    },
-    {
-      name: '@electron-forge/maker-rpm',
-      platforms: ['linux'],
-    },
   ],
 };

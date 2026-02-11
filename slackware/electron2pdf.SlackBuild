@@ -1,0 +1,39 @@
+#!/bin/sh
+
+set -e
+
+PRGNAM=electron2pdf
+VERSION=${VERSION:-0.1.0}
+BUILD=${BUILD:-1}
+TAG=${TAG:-_SBo}
+
+ARCH=${ARCH:-x86_64}
+
+CWD=$(pwd)
+TMP=${TMP:-/tmp/SBo}
+PKG=$TMP/package-$PRGNAM
+OUTPUT=${OUTPUT:-/tmp}
+
+TARBALL=${TARBALL:-$CWD/../homebrew/electron2pdf-${VERSION}-linux-x64.tar.gz}
+
+rm -rf "$PKG"
+mkdir -p "$TMP" "$PKG" "$OUTPUT"
+
+cd "$TMP"
+rm -rf "$PRGNAM-$VERSION"
+mkdir -p "$PRGNAM-$VERSION"
+cd "$PRGNAM-$VERSION"
+
+tar -xzf "$TARBALL"
+
+mkdir -p "$PKG/opt/$PRGNAM"
+cp -a homebrew/* "$PKG/opt/$PRGNAM/"
+
+mkdir -p "$PKG/usr/bin"
+ln -sf "/opt/$PRGNAM/bin/$PRGNAM" "$PKG/usr/bin/$PRGNAM"
+
+mkdir -p "$PKG/install"
+cp -a "$CWD/slack-desc" "$PKG/install/slack-desc"
+
+cd "$PKG"
+/sbin/makepkg -l y -c n "$OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.tgz"

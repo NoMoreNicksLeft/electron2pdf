@@ -1,5 +1,7 @@
 node_modules/
 .DS_Store
 *.pdf
-tmp-*.js
+tmp-run-script.js
 out/
+*.tar.gz
+homebrew/

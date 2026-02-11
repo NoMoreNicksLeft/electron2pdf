@@ -1,0 +1,15 @@
+electron2pdf SlackBuild (repackaging)
+
+This SlackBuild repackages the prebuilt Linux tarball produced in ../homebrew/
+into a Slackware package that installs to /opt/electron2pdf/.
+
+Build:
+  cd slackware
+  chmod +x electron2pdf.SlackBuild
+  ./electron2pdf.SlackBuild
+
+Install:
+  installpkg /tmp/electron2pdf-*.tgz
+
+After installation:
+  /usr/bin/electron2pdf will run /opt/electron2pdf/bin/electron2pdf

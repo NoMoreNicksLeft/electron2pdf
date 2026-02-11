@@ -1,0 +1,8 @@
+PRGNAM="electron2pdf"
+VERSION="0.1.0"
+HOMEPAGE="https://example.com/REPLACE_ME"
+DOWNLOAD_x86_64="https://example.com/REPLACE_ME-linux-x64.tar.gz"
+MD5SUM_x86_64=""
+REQUIRES=""
+MAINTAINER=""
+EMAIL=""
