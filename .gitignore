@@ -5,3 +5,4 @@ tmp-run-script.js
 out/
 *.tar.gz
 homebrew/
+dist/
