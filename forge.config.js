@@ -4,6 +4,7 @@ module.exports = {
     asar: true,
     ignore: [
       /^\/homebrew\//,
+      /^\/dist\//,
       /^\/out\//,
       /^\/slackware\//,
       /^\/\.git\//,
