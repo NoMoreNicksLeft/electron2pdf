@@ -1,6 +1,6 @@
 electron2pdf SlackBuild (repackaging)
 
-This SlackBuild repackages the prebuilt Linux tarball produced in ../homebrew/
+This SlackBuild repackages the prebuilt Linux tarball produced in ../dist/
 into a Slackware package that installs to /opt/electron2pdf/.
 
 Build:

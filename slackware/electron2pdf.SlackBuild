@@ -14,7 +14,7 @@ TMP=${TMP:-/tmp/SBo}
 PKG=$TMP/package-$PRGNAM
 OUTPUT=${OUTPUT:-/tmp}
 
-TARBALL=${TARBALL:-$CWD/../homebrew/electron2pdf-${VERSION}-linux-x64.tar.gz}
+TARBALL=${TARBALL:-$CWD/../dist/electron2pdf-${VERSION}-linux-x64.tar.gz}
 
 rm -rf "$PKG"
 mkdir -p "$TMP" "$PKG" "$OUTPUT"
@@ -27,7 +27,7 @@ cd "$PRGNAM-$VERSION"
 tar -xzf "$TARBALL"
 
 mkdir -p "$PKG/opt/$PRGNAM"
-cp -a homebrew/* "$PKG/opt/$PRGNAM/"
+cp -a bin libexec "$PKG/opt/$PRGNAM/"
 
 mkdir -p "$PKG/usr/bin"
 ln -sf "/opt/$PRGNAM/bin/$PRGNAM" "$PKG/usr/bin/$PRGNAM"

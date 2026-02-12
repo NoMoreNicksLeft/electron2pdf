@@ -8,7 +8,7 @@
 electron2pdf: electron2pdf (Chromium-based HTML to PDF CLI)
 electron2pdf:
 electron2pdf: electron2pdf renders webpages or local HTML files to PDF using
-electron2pdf: Chromium via an Electron runtime.
+electron2pdf: Chromium via an Electron runtime (similar to wkhtmltopdf).
 electron2pdf:
 electron2pdf: This SlackBuild repackages the prebuilt Linux tarball and installs
 electron2pdf: into /opt/electron2pdf with a /usr/bin/electron2pdf symlink.
