@@ -13,5 +13,5 @@ electron2pdf:
 electron2pdf: This SlackBuild repackages the prebuilt Linux tarball and installs
 electron2pdf: into /opt/electron2pdf with a /usr/bin/electron2pdf symlink.
 electron2pdf:
-electron2pdf: Homepage: https://example.com/REPLACE_ME
+electron2pdf: Homepage: https://github.com/NoMoreNicksLeft/electron2pdf
 electron2pdf:
